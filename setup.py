@@ -49,12 +49,8 @@ setup(name=PACKAGE_NAME,
           'numpy>=1.15.1',
           'scipy>=1.1.0',
           'scikit-image',
-          'pandas>=0.23.4',
-          'aicsimageio>3.3.0',
           'tqdm',
           'pyyaml',
-          'aicssegmentation',
-          #'pytorch=1.0.0'
       ],
 
       # For test setup. This will allow JUnit XML output for Jenkins

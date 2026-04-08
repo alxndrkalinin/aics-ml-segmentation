@@ -2,7 +2,6 @@ import numpy as np
 import logging
 import sys
 from typing import List
-from aicsimageio import AICSImage
 from scipy.ndimage import zoom
 import os
 from scipy import ndimage as ndi
