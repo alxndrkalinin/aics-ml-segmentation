@@ -1,7 +1,3 @@
-from .version import MODULE_VERSION
+"""Scripts for ML structure segmentation."""
 
-
-def get_module_version():
-    return MODULE_VERSION
-
-
+__version__ = "0.1.0"

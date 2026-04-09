@@ -1,15 +1,14 @@
-import numpy as np
 import os
-from PIL import Image
-import random
-
-from torch import from_numpy
-from aicsimageio import imread
-from random import shuffle
 import time
-from torchvision.transforms import ToTensor
-from torch.utils.data import Dataset
+import random
+from random import shuffle
 
+import numpy as np
+from PIL import Image
+from torch import from_numpy
+from tifffile import imread
+from torch.utils.data import Dataset
+from torchvision.transforms import ToTensor
 
 # CODE for generic loader
 #   No augmentation = NOAUG,simply load data and convert to tensor
@@ -25,40 +24,38 @@ from torch.utils.data import Dataset
 
 
 class RR_FH_M0(Dataset):
-
     def __init__(self, filenames, num_patch, size_in, size_out):
 
         self.img = []
         self.gt = []
         self.cmap = []
 
-        padding = [(x-y)//2 for x,y in zip(size_in, size_out)]
-        total_in_count = size_in[0] * size_in[1] * size_in[2]
-        total_out_count = size_out[0] * size_out[1] * size_out[2]
+        padding = [(x - y) // 2 for x, y in zip(size_in, size_out)]
 
         num_data = len(filenames)
         shuffle(filenames)
         num_patch_per_img = np.zeros((num_data,), dtype=int)
         if num_data >= num_patch:
             # all one
-            num_patch_per_img[:num_patch]=1
-        else: 
+            num_patch_per_img[:num_patch] = 1
+        else:
             basic_num = num_patch // num_data
             # assign each image the same number of patches to extract
             num_patch_per_img[:] = basic_num
 
             # assign one more patch to the first few images to achieve the total patch number
-            num_patch_per_img[:(num_patch-basic_num*num_data)] = num_patch_per_img[:(num_patch-basic_num*num_data)] + 1
+            num_patch_per_img[: (num_patch - basic_num * num_data)] = (
+                num_patch_per_img[: (num_patch - basic_num * num_data)] + 1
+            )
 
         for img_idx, fn in enumerate(filenames):
-
-            if len(self.img)==num_patch:
+            if len(self.img) == num_patch:
                 break
 
-            label = np.squeeze(imread(fn+'_GT.ome.tif'))
+            label = np.squeeze(imread(fn + "_GT.ome.tif"))
             label = np.expand_dims(label, axis=0)
 
-            input_img = np.squeeze(imread(fn+'.ome.tif'))
+            input_img = np.squeeze(imread(fn + ".ome.tif"))
             if len(input_img.shape) == 3:
                 # add channel dimension
                 input_img = np.expand_dims(input_img, axis=0)
@@ -67,61 +64,90 @@ class RR_FH_M0(Dataset):
                 if input_img.shape[0] > input_img.shape[1]:
                     input_img = np.transpose(input_img, (1, 0, 2, 3))
 
-            costmap = np.squeeze(imread(fn+'_CM.ome.tif'))
+            costmap = np.squeeze(imread(fn + "_CM.ome.tif"))
 
-            img_pad0 = np.pad(input_img, ((0,0),(0,0),(padding[1],padding[1]),(padding[2],padding[2])), 'constant')
-            raw = np.pad(img_pad0, ((0,0),(padding[0],padding[0]),(0,0),(0,0)), 'constant')
+            img_pad0 = np.pad(
+                input_img,
+                ((0, 0), (0, 0), (padding[1], padding[1]), (padding[2], padding[2])),
+                "constant",
+            )
+            raw = np.pad(
+                img_pad0, ((0, 0), (padding[0], padding[0]), (0, 0), (0, 0)), "constant"
+            )
 
             cost_scale = costmap.max()
-            if cost_scale<1: ## this should not happen, but just in case
+            if cost_scale < 1:  ## this should not happen, but just in case
                 cost_scale = 1
 
-            deg = random.randrange(1,180)
+            deg = random.randrange(1, 180)
             flip_flag = random.random()
 
             for zz in range(label.shape[1]):
-
                 for ci in range(label.shape[0]):
-                    labi = label[ci,zz,:,:]
+                    labi = label[ci, zz, :, :]
                     labi_pil = Image.fromarray(np.uint8(labi))
-                    new_labi_pil = labi_pil.rotate(deg,resample=Image.NEAREST)
-                    if flip_flag<0.5:
-                        new_labi_pil = new_labi_pil.transpose(Image.FLIP_LEFT_RIGHT)
-                    new_labi = np.array(new_labi_pil.convert('L'))
-                    label[ci,zz,:,:] = new_labi.astype(int)
+                    new_labi_pil = labi_pil.rotate(
+                        deg, resample=Image.Resampling.NEAREST
+                    )
+                    if flip_flag < 0.5:
+                        new_labi_pil = new_labi_pil.transpose(
+                            Image.Transpose.FLIP_LEFT_RIGHT
+                        )
+                    new_labi = np.array(new_labi_pil.convert("L"))
+                    label[ci, zz, :, :] = new_labi.astype(int)
 
-                cmap = costmap[zz,:,:]
-                cmap_pil = Image.fromarray(np.uint8(255*(cmap/cost_scale)))
-                new_cmap_pil = cmap_pil.rotate(deg,resample=Image.NEAREST)
-                if flip_flag<0.5:
-                    new_cmap_pil = new_cmap_pil.transpose(Image.FLIP_LEFT_RIGHT)
-                new_cmap = np.array(new_cmap_pil.convert('L'))
-                costmap[zz,:,:] = cost_scale*(new_cmap/255.0)
+                cmap = costmap[zz, :, :]
+                cmap_pil = Image.fromarray(np.uint8(255 * (cmap / cost_scale)))
+                new_cmap_pil = cmap_pil.rotate(deg, resample=Image.Resampling.NEAREST)
+                if flip_flag < 0.5:
+                    new_cmap_pil = new_cmap_pil.transpose(
+                        Image.Transpose.FLIP_LEFT_RIGHT
+                    )
+                new_cmap = np.array(new_cmap_pil.convert("L"))
+                costmap[zz, :, :] = cost_scale * (new_cmap / 255.0)
 
             for zz in range(raw.shape[1]):
                 for ci in range(raw.shape[0]):
-                    str_im = raw[ci,zz,:,:]
-                    str_im_pil = Image.fromarray(np.uint8(str_im*255))
-                    new_str_im_pil = str_im_pil.rotate(deg,resample=Image.BICUBIC)
-                    if flip_flag<0.5:
-                        new_str_im_pil = new_str_im_pil.transpose(Image.FLIP_LEFT_RIGHT)
-                    new_str_image = np.array(new_str_im_pil.convert('L'))
-                    raw[ci,zz,:,:] = (new_str_image.astype(float))/255.0 
+                    str_im = raw[ci, zz, :, :]
+                    str_im_pil = Image.fromarray(np.uint8(str_im * 255))
+                    new_str_im_pil = str_im_pil.rotate(
+                        deg, resample=Image.Resampling.BICUBIC
+                    )
+                    if flip_flag < 0.5:
+                        new_str_im_pil = new_str_im_pil.transpose(
+                            Image.Transpose.FLIP_LEFT_RIGHT
+                        )
+                    new_str_image = np.array(new_str_im_pil.convert("L"))
+                    raw[ci, zz, :, :] = (new_str_image.astype(float)) / 255.0
             new_patch_num = 0
-            
+
             while new_patch_num < num_patch_per_img[img_idx]:
-                
                 pz = random.randint(0, label.shape[1] - size_out[0])
                 py = random.randint(0, label.shape[2] - size_out[1])
                 px = random.randint(0, label.shape[3] - size_out[2])
 
-                
                 # check if this is a good crop
-                ref_patch_cmap = costmap[pz:pz+size_out[0],py:py+size_out[1],px:px+size_out[2]]
+                ref_patch_cmap = costmap[
+                    pz : pz + size_out[0], py : py + size_out[1], px : px + size_out[2]
+                ]
 
                 # confirmed good crop
-                (self.img).append(raw[:,pz:pz+size_in[0],py:py+size_in[1],px:px+size_in[2]] )
-                (self.gt).append(label[:,pz:pz+size_out[0],py:py+size_out[1],px:px+size_out[2]])
+                (self.img).append(
+                    raw[
+                        :,
+                        pz : pz + size_in[0],
+                        py : py + size_in[1],
+                        px : px + size_in[2],
+                    ]
+                )
+                (self.gt).append(
+                    label[
+                        :,
+                        pz : pz + size_out[0],
+                        py : py + size_out[1],
+                        px : px + size_out[2],
+                    ]
+                )
                 (self.cmap).append(ref_patch_cmap)
 
                 new_patch_num += 1
@@ -132,10 +158,12 @@ class RR_FH_M0(Dataset):
         cmap_tensor = from_numpy(self.cmap[index].astype(float))
 
         label_tensor = []
-        if self.gt[index].shape[0]>0:
+        if self.gt[index].shape[0] > 0:
             for zz in range(self.gt[index].shape[0]):
-                label_tensor.append(from_numpy(self.gt[index][zz,:,:,:].astype(float)).float())
-        else: 
+                label_tensor.append(
+                    from_numpy(self.gt[index][zz, :, :, :].astype(float)).float()
+                )
+        else:
             label_tensor.append(from_numpy(self.gt[index].astype(float)).float())
 
         return image_tensor.float(), label_tensor, cmap_tensor.float()
@@ -143,22 +171,21 @@ class RR_FH_M0(Dataset):
     def __len__(self):
         return len(self.img)
 
-class RR_FH_M0C(Dataset):
 
+class RR_FH_M0C(Dataset):
     def __init__(self, filenames, num_patch, size_in, size_out):
 
         self.img = []
         self.gt = []
         self.cmap = []
 
-        padding = [(x-y)//2 for x,y in zip(size_in, size_out)]
-        
+        padding = [(x - y) // 2 for x, y in zip(size_in, size_out)]
+
         num_data = len(filenames)
         shuffle(filenames)
 
         num_trial_round = 0
         while len(self.img) < num_patch:
-
             # to avoid dead loop
             num_trial_round = num_trial_round + 1
             if num_trial_round > 2:
@@ -168,25 +195,26 @@ class RR_FH_M0C(Dataset):
             num_patch_per_img = np.zeros((num_data,), dtype=int)
             if num_data >= num_patch_to_obtain:
                 # all one
-                num_patch_per_img[:num_patch_to_obtain]=1
-            else: 
+                num_patch_per_img[:num_patch_to_obtain] = 1
+            else:
                 basic_num = num_patch_to_obtain // num_data
                 # assign each image the same number of patches to extract
                 num_patch_per_img[:] = basic_num
 
                 # assign one more patch to the first few images to achieve the total patch number
-                num_patch_per_img[:(num_patch_to_obtain-basic_num*num_data)] = num_patch_per_img[:(num_patch_to_obtain-basic_num*num_data)] + 1
+                num_patch_per_img[: (num_patch_to_obtain - basic_num * num_data)] = (
+                    num_patch_per_img[: (num_patch_to_obtain - basic_num * num_data)]
+                    + 1
+                )
 
-        
             for img_idx, fn in enumerate(filenames):
-                
-                if len(self.img)==num_patch:
+                if len(self.img) == num_patch:
                     break
 
-                label = np.squeeze(imread(fn+'_GT.ome.tif'))
+                label = np.squeeze(imread(fn + "_GT.ome.tif"))
                 label = np.expand_dims(label, axis=0)
 
-                input_img = np.squeeze(imread(fn+'.ome.tif'))
+                input_img = np.squeeze(imread(fn + ".ome.tif"))
                 if len(input_img.shape) == 3:
                     # add channel dimension
                     input_img = np.expand_dims(input_img, axis=0)
@@ -195,82 +223,125 @@ class RR_FH_M0C(Dataset):
                     if input_img.shape[0] > input_img.shape[1]:
                         input_img = np.transpose(input_img, (1, 0, 2, 3))
 
-                costmap = np.squeeze(imread(fn+'_CM.ome.tif'))
+                costmap = np.squeeze(imread(fn + "_CM.ome.tif"))
 
-                img_pad0 = np.pad(input_img, ((0,0),(0,0),(padding[1],padding[1]),(padding[2],padding[2])), 'constant')
-                raw = np.pad(img_pad0, ((0,0),(padding[0],padding[0]),(0,0),(0,0)), 'constant')
+                img_pad0 = np.pad(
+                    input_img,
+                    (
+                        (0, 0),
+                        (0, 0),
+                        (padding[1], padding[1]),
+                        (padding[2], padding[2]),
+                    ),
+                    "constant",
+                )
+                raw = np.pad(
+                    img_pad0,
+                    ((0, 0), (padding[0], padding[0]), (0, 0), (0, 0)),
+                    "constant",
+                )
 
                 cost_scale = costmap.max()
-                if cost_scale<1: ## this should not happen, but just in case
+                if cost_scale < 1:  ## this should not happen, but just in case
                     cost_scale = 1
 
-                deg = random.randrange(1,180)
+                deg = random.randrange(1, 180)
                 flip_flag = random.random()
 
                 for zz in range(label.shape[1]):
-
                     for ci in range(label.shape[0]):
-                        labi = label[ci,zz,:,:]
+                        labi = label[ci, zz, :, :]
                         labi_pil = Image.fromarray(np.uint8(labi))
-                        new_labi_pil = labi_pil.rotate(deg,resample=Image.NEAREST)
-                        if flip_flag<0.5:
-                            new_labi_pil = new_labi_pil.transpose(Image.FLIP_LEFT_RIGHT)
-                        new_labi = np.array(new_labi_pil.convert('L'))
-                        label[ci,zz,:,:] = new_labi.astype(int)
+                        new_labi_pil = labi_pil.rotate(
+                            deg, resample=Image.Resampling.NEAREST
+                        )
+                        if flip_flag < 0.5:
+                            new_labi_pil = new_labi_pil.transpose(
+                                Image.Transpose.FLIP_LEFT_RIGHT
+                            )
+                        new_labi = np.array(new_labi_pil.convert("L"))
+                        label[ci, zz, :, :] = new_labi.astype(int)
 
-                    cmap = costmap[zz,:,:]
-                    cmap_pil = Image.fromarray(np.uint8(255*(cmap/cost_scale)))
-                    new_cmap_pil = cmap_pil.rotate(deg,resample=Image.NEAREST)
-                    if flip_flag<0.5:
-                        new_cmap_pil = new_cmap_pil.transpose(Image.FLIP_LEFT_RIGHT)
-                    new_cmap = np.array(new_cmap_pil.convert('L'))
-                    costmap[zz,:,:] = cost_scale*(new_cmap/255.0)
+                    cmap = costmap[zz, :, :]
+                    cmap_pil = Image.fromarray(np.uint8(255 * (cmap / cost_scale)))
+                    new_cmap_pil = cmap_pil.rotate(
+                        deg, resample=Image.Resampling.NEAREST
+                    )
+                    if flip_flag < 0.5:
+                        new_cmap_pil = new_cmap_pil.transpose(
+                            Image.Transpose.FLIP_LEFT_RIGHT
+                        )
+                    new_cmap = np.array(new_cmap_pil.convert("L"))
+                    costmap[zz, :, :] = cost_scale * (new_cmap / 255.0)
 
                 for zz in range(raw.shape[1]):
                     for ci in range(raw.shape[0]):
-                        str_im = raw[ci,zz,:,:]
-                        str_im_pil = Image.fromarray(np.uint8(str_im*255))
-                        new_str_im_pil = str_im_pil.rotate(deg,resample=Image.BICUBIC)
-                        if flip_flag<0.5:
-                            new_str_im_pil = new_str_im_pil.transpose(Image.FLIP_LEFT_RIGHT)
-                        new_str_image = np.array(new_str_im_pil.convert('L'))
-                        raw[ci,zz,:,:] = (new_str_image.astype(float))/255.0 
+                        str_im = raw[ci, zz, :, :]
+                        str_im_pil = Image.fromarray(np.uint8(str_im * 255))
+                        new_str_im_pil = str_im_pil.rotate(
+                            deg, resample=Image.Resampling.BICUBIC
+                        )
+                        if flip_flag < 0.5:
+                            new_str_im_pil = new_str_im_pil.transpose(
+                                Image.Transpose.FLIP_LEFT_RIGHT
+                            )
+                        new_str_image = np.array(new_str_im_pil.convert("L"))
+                        raw[ci, zz, :, :] = (new_str_image.astype(float)) / 255.0
 
                 new_patch_num = 0
                 num_fail = 0
                 while new_patch_num < num_patch_per_img[img_idx]:
-                    
                     pz = random.randint(0, label.shape[1] - size_out[0])
                     py = random.randint(0, label.shape[2] - size_out[1])
                     px = random.randint(0, label.shape[3] - size_out[2])
 
-                    
                     # check if this is a good crop
-                    ref_patch_cmap = costmap[pz:pz+size_out[0],py:py+size_out[1],px:px+size_out[2]]
-                    if np.count_nonzero(ref_patch_cmap>1e-5) < 1000: #enough valida samples
+                    ref_patch_cmap = costmap[
+                        pz : pz + size_out[0],
+                        py : py + size_out[1],
+                        px : px + size_out[2],
+                    ]
+                    if (
+                        np.count_nonzero(ref_patch_cmap > 1e-5) < 1000
+                    ):  # enough valida samples
                         num_fail = num_fail + 1
                         if num_fail > 50:
                             break
                         continue
-                    
 
                     # confirmed good crop
-                    (self.img).append(raw[:,pz:pz+size_in[0],py:py+size_in[1],px:px+size_in[2]] )
-                    (self.gt).append(label[:,pz:pz+size_out[0],py:py+size_out[1],px:px+size_out[2]])
+                    (self.img).append(
+                        raw[
+                            :,
+                            pz : pz + size_in[0],
+                            py : py + size_in[1],
+                            px : px + size_in[2],
+                        ]
+                    )
+                    (self.gt).append(
+                        label[
+                            :,
+                            pz : pz + size_out[0],
+                            py : py + size_out[1],
+                            px : px + size_out[2],
+                        ]
+                    )
                     (self.cmap).append(ref_patch_cmap)
 
                     new_patch_num += 1
-        
+
     def __getitem__(self, index):
 
         image_tensor = from_numpy(self.img[index].astype(float))
         cmap_tensor = from_numpy(self.cmap[index].astype(float))
 
         label_tensor = []
-        if self.gt[index].shape[0]>0:
+        if self.gt[index].shape[0] > 0:
             for zz in range(self.gt[index].shape[0]):
-                label_tensor.append(from_numpy(self.gt[index][zz,:,:,:].astype(float)).float())
-        else: 
+                label_tensor.append(
+                    from_numpy(self.gt[index][zz, :, :, :].astype(float)).float()
+                )
+        else:
             label_tensor.append(from_numpy(self.gt[index].astype(float)).float())
 
         return image_tensor.float(), label_tensor, cmap_tensor.float()
@@ -278,39 +349,37 @@ class RR_FH_M0C(Dataset):
     def __len__(self):
         return len(self.img)
 
-class NOAUG_M(Dataset):
 
+class NOAUG_M(Dataset):
     def __init__(self, filenames, num_patch, size_in, size_out):
 
         self.img = []
         self.gt = []
         self.cmap = []
 
-        padding = [(x-y)//2 for x,y in zip(size_in, size_out)]
-        total_in_count = size_in[0] * size_in[1] * size_in[2]
-        total_out_count = size_out[0] * size_out[1] * size_out[2]
+        padding = [(x - y) // 2 for x, y in zip(size_in, size_out)]
 
         num_data = len(filenames)
         shuffle(filenames)
         num_patch_per_img = np.zeros((num_data,), dtype=int)
         if num_data >= num_patch:
             # all one
-            num_patch_per_img[:num_patch]=1
-        else: 
+            num_patch_per_img[:num_patch] = 1
+        else:
             basic_num = num_patch // num_data
             # assign each image the same number of patches to extract
             num_patch_per_img[:] = basic_num
 
             # assign one more patch to the first few images to achieve the total patch number
-            num_patch_per_img[:(num_patch-basic_num*num_data)] = num_patch_per_img[:(num_patch-basic_num*num_data)] + 1
-
+            num_patch_per_img[: (num_patch - basic_num * num_data)] = (
+                num_patch_per_img[: (num_patch - basic_num * num_data)] + 1
+            )
 
         for img_idx, fn in enumerate(filenames):
-
-            label = np.squeeze(imread(fn+'_GT.ome.tif'))
+            label = np.squeeze(imread(fn + "_GT.ome.tif"))
             label = np.expand_dims(label, axis=0)
 
-            input_img = np.squeeze(imread(fn+'.ome.tif'))
+            input_img = np.squeeze(imread(fn + ".ome.tif"))
             if len(input_img.shape) == 3:
                 # add channel dimension
                 input_img = np.expand_dims(input_img, axis=0)
@@ -319,45 +388,64 @@ class NOAUG_M(Dataset):
                 if input_img.shape[0] > input_img.shape[1]:
                     input_img = np.transpose(input_img, (1, 0, 2, 3))
 
-            costmap = np.squeeze(imread(fn+'_CM.ome.tif'))
+            costmap = np.squeeze(imread(fn + "_CM.ome.tif"))
 
-            img_pad0 = np.pad(input_img, ((0,0),(0,0),(padding[1],padding[1]),(padding[2],padding[2])), 'symmetric')
-            raw = np.pad(img_pad0, ((0,0),(padding[0],padding[0]),(0,0),(0,0)), 'constant')
+            img_pad0 = np.pad(
+                input_img,
+                ((0, 0), (0, 0), (padding[1], padding[1]), (padding[2], padding[2])),
+                "symmetric",
+            )
+            raw = np.pad(
+                img_pad0, ((0, 0), (padding[0], padding[0]), (0, 0), (0, 0)), "constant"
+            )
 
             new_patch_num = 0
-            
+
             while new_patch_num < num_patch_per_img[img_idx]:
-                
                 pz = random.randint(0, label.shape[1] - size_out[0])
                 py = random.randint(0, label.shape[2] - size_out[1])
                 px = random.randint(0, label.shape[3] - size_out[2])
 
-                
                 ## check if this is a good crop
-                ref_patch_cmap = costmap[pz:pz+size_out[0],py:py+size_out[1],px:px+size_out[2]]
-                
+                ref_patch_cmap = costmap[
+                    pz : pz + size_out[0], py : py + size_out[1], px : px + size_out[2]
+                ]
 
                 # confirmed good crop
-                (self.img).append(raw[:,pz:pz+size_in[0],py:py+size_in[1],px:px+size_in[2]] )
-                (self.gt).append(label[:,pz:pz+size_out[0],py:py+size_out[1],px:px+size_out[2]])
+                (self.img).append(
+                    raw[
+                        :,
+                        pz : pz + size_in[0],
+                        py : py + size_in[1],
+                        px : px + size_in[2],
+                    ]
+                )
+                (self.gt).append(
+                    label[
+                        :,
+                        pz : pz + size_out[0],
+                        py : py + size_out[1],
+                        px : px + size_out[2],
+                    ]
+                )
                 (self.cmap).append(ref_patch_cmap)
 
                 new_patch_num += 1
-                
+
     def __getitem__(self, index):
 
         image_tensor = from_numpy(self.img[index].astype(float))
         cmap_tensor = from_numpy(self.cmap[index].astype(float))
 
-        #if self.gt[index].shape[0]>1:
+        # if self.gt[index].shape[0]>1:
         label_tensor = []
         for zz in range(self.gt[index].shape[0]):
-            tmp_tensor = from_numpy(self.gt[index][zz,:,:,:].astype(float))
+            tmp_tensor = from_numpy(self.gt[index][zz, :, :, :].astype(float))
             label_tensor.append(tmp_tensor.float())
-        #else: 
+        # else:
         #    label_tensor = from_numpy(self.gt[index].astype(float))
         #    label_tensor = label_tensor.float()
-            
+
         return image_tensor.float(), label_tensor, cmap_tensor.float()
 
     def __len__(self):
